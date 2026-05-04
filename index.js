@@ -2,13 +2,15 @@ import express from "express";
 import cors from "cors";
 import { uuidv7 } from "uuidv7";
 import axios from "axios";
-import supabase from "./connectDB.js";
+import supabase from "./utils/connectDB.js";
 import fs from "fs";
 import { getData } from "country-list";
+import profilesRouter from "./routes/profiles.js";
+import authRouter from "./routes/auth.js";
 
 const app = express();
 app.use(cors({ origin: "*" }));
-// Some graders check for this exact header.
+
 app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   next();
@@ -98,8 +100,18 @@ const parseCountryIdFromText = (raw) => {
 };
 
 const intersectAgeRange = (currMin, currMax, nextMin, nextMax) => {
-  const min = nextMin == null ? currMin : currMin == null ? nextMin : Math.max(currMin, nextMin);
-  const max = nextMax == null ? currMax : currMax == null ? nextMax : Math.min(currMax, nextMax);
+  const min =
+    nextMin == null
+      ? currMin
+      : currMin == null
+        ? nextMin
+        : Math.max(currMin, nextMin);
+  const max =
+    nextMax == null
+      ? currMax
+      : currMax == null
+        ? nextMax
+        : Math.min(currMax, nextMax);
   return { min, max };
 };
 
@@ -118,16 +130,32 @@ const parseNaturalLanguageFilters = (q) => {
 
   // Gender (if both appear, don't filter by gender)
   // Token-based matching avoids false positives like "female" containing "male".
-  const hasMale = hasAnyToken(wordSet, ["male", "males", "man", "men", "boy", "boys"]);
-  const hasFemale = hasAnyToken(wordSet, ["female", "females", "woman", "women", "girl", "girls"]);
+  const hasMale = hasAnyToken(wordSet, [
+    "male",
+    "males",
+    "man",
+    "men",
+    "boy",
+    "boys",
+  ]);
+  const hasFemale = hasAnyToken(wordSet, [
+    "female",
+    "females",
+    "woman",
+    "women",
+    "girl",
+    "girls",
+  ]);
   if (hasMale && !hasFemale) filters.gender = "male";
   if (hasFemale && !hasMale) filters.gender = "female";
 
   // Age group
   if (hasAnyToken(wordSet, ["child", "children"])) filters.age_group = "child";
-  if (hasAnyToken(wordSet, ["teenager", "teenagers", "teen", "teens"])) filters.age_group = "teenager";
+  if (hasAnyToken(wordSet, ["teenager", "teenagers", "teen", "teens"]))
+    filters.age_group = "teenager";
   if (hasAnyToken(wordSet, ["adult", "adults"])) filters.age_group = "adult";
-  if (hasAnyToken(wordSet, ["senior", "seniors", "elderly"])) filters.age_group = "senior";
+  if (hasAnyToken(wordSet, ["senior", "seniors", "elderly"]))
+    filters.age_group = "senior";
 
   let minAge = null;
   let maxAge = null;
@@ -145,7 +173,12 @@ const parseNaturalLanguageFilters = (q) => {
       const b = Number.parseInt(m[2], 10);
       const lo = Math.min(a, b);
       const hi = Math.max(a, b);
-      ({ min: minAge, max: maxAge } = intersectAgeRange(minAge, maxAge, lo, hi));
+      ({ min: minAge, max: maxAge } = intersectAgeRange(
+        minAge,
+        maxAge,
+        lo,
+        hi,
+      ));
     }
   }
 
@@ -157,7 +190,12 @@ const parseNaturalLanguageFilters = (q) => {
       const b = Number.parseInt(m[2], 10);
       const lo = Math.min(a, b);
       const hi = Math.max(a, b);
-      ({ min: minAge, max: maxAge } = intersectAgeRange(minAge, maxAge, lo, hi));
+      ({ min: minAge, max: maxAge } = intersectAgeRange(
+        minAge,
+        maxAge,
+        lo,
+        hi,
+      ));
     }
   }
 
@@ -165,23 +203,44 @@ const parseNaturalLanguageFilters = (q) => {
   {
     const m = text.match(/\b(?:above|over|older than|at least)\s+(\d{1,3})\b/);
     const m2 = text.match(/\b(\d{1,3})\s*\+\b/);
-    const n = m ? Number.parseInt(m[1], 10) : m2 ? Number.parseInt(m2[1], 10) : null;
-    if (n != null) ({ min: minAge, max: maxAge } = intersectAgeRange(minAge, maxAge, n, null));
+    const n = m
+      ? Number.parseInt(m[1], 10)
+      : m2
+        ? Number.parseInt(m2[1], 10)
+        : null;
+    if (n != null)
+      ({ min: minAge, max: maxAge } = intersectAgeRange(
+        minAge,
+        maxAge,
+        n,
+        null,
+      ));
   }
 
   // below / under / younger than / at most
   {
-    const m = text.match(/\b(?:below|under|younger than|at most)\s+(\d{1,3})\b/);
+    const m = text.match(
+      /\b(?:below|under|younger than|at most)\s+(\d{1,3})\b/,
+    );
     if (m) {
       const n = Number.parseInt(m[1], 10);
-      ({ min: minAge, max: maxAge } = intersectAgeRange(minAge, maxAge, null, n));
+      ({ min: minAge, max: maxAge } = intersectAgeRange(
+        minAge,
+        maxAge,
+        null,
+        n,
+      ));
     }
   }
 
   if (minAge != null) filters.min_age = minAge;
   if (maxAge != null) filters.max_age = maxAge;
 
-  if (filters.min_age != null && filters.max_age != null && filters.min_age > filters.max_age) {
+  if (
+    filters.min_age != null &&
+    filters.max_age != null &&
+    filters.min_age > filters.max_age
+  ) {
     return null;
   }
 
@@ -311,181 +370,6 @@ const duplicateCheck = async (name) => {
 
   return { data, error };
 };
-// *
-app.get("/api/profiles", async (req, res) => {
-  const {
-    gender,
-    country_id,
-    age_group,
-    sort_by,
-    order,
-    page,
-    limit,
-    min_age,
-    max_age,
-    min_gender_probability,
-    min_country_probability,
-  } = req.query;
-  let query = supabase.from("profiles").select("*", { count: "exact" });
 
-  const pagination = getPagination(page, limit);
-  if (pagination.error) {
-    return res.status(422).send({
-      status: "error",
-      message: "Invalid query parameters",
-    });
-  }
-
-  // * FILTERTING
-  if (gender) {
-    query = query.eq("gender", gender.toLowerCase());
-  }
-  if (country_id) {
-    query = query.eq("country_id", country_id.toUpperCase());
-  }
-  if (age_group) {
-    query = query.eq("age_group", age_group.toLowerCase());
-  }
-
-  const minAgeNum = parsePositiveInt(min_age);
-  const maxAgeNum = parsePositiveInt(max_age);
-  const minGenderProbNum = parsePositiveFloat(min_gender_probability);
-  const minCountryProbNum = parsePositiveFloat(min_country_probability);
-
-  if (Number.isNaN(minAgeNum) || Number.isNaN(maxAgeNum) || Number.isNaN(minGenderProbNum) || Number.isNaN(minCountryProbNum)) {
-    return res.status(422).send({
-      status: "error",
-      message: "Invalid query parameters",
-    });
-  }
-
-  if (minAgeNum != null) query = query.gte("age", minAgeNum);
-  if (maxAgeNum != null) query = query.lte("age", maxAgeNum);
-  if (minGenderProbNum != null) query = query.gte("gender_probability", minGenderProbNum);
-  if (minCountryProbNum != null) query = query.gte("country_probability", minCountryProbNum);
-
-  if (minAgeNum != null && maxAgeNum != null && minAgeNum > maxAgeNum) {
-    return res.status(422).send({
-      status: "error",
-      message: "Invalid query parameters",
-    });
-  }
-  let orderBool = null;
-  // * SORTING
-  if (sort_by) {
-    const allowedSort = new Set(["age", "created_at", "gender_probability"]);
-    if (!allowedSort.has(sort_by)) {
-      return res.status(422).send({
-        status: "error",
-        message: "Invalid query parameters",
-      });
-    }
-
-    if (order === undefined) {
-      orderBool = true;
-    } else if (order === "asc") {
-      orderBool = true;
-    } else if (order === "desc") {
-      orderBool = false;
-    } else {
-      return res.status(422).send({
-        status: "error",
-        message: "Invalid query parameters",
-      });
-    }
-
-    query = query.order(sort_by, {
-      ascending: orderBool,
-    });
-  }
-
-  // * PAGINATION
-
-  query = query.range(pagination.start, pagination.end);
-
-  try {
-    const { data, error, count } = await query;
-    if (error) {
-      return res.status(500).send({
-        status: "error",
-        message: error.message || "Server failure",
-      });
-    }
-    if (data.length >= 1 || data.length === 0) {
-      return res.status(200).send({
-        status: "success",
-        page: pagination.page,
-        limit: pagination.limit,
-        total: count,
-        data,
-      });
-    }
-  } catch (error) {
-    console.log(error);
-    return res.status(500).send({
-      status: "error",
-      message: "Server failure",
-    });
-  }
-});
-
-// * NATURAL LANGUAGE QUERY
-app.get("/api/profiles/search", async (req, res) => {
-  const { q, page, limit } = req.query;
-
-  if (typeof q !== "string" || q.trim() === "") {
-    return res.status(400).send({
-      status: "error",
-      message: "Missing or empty parameter",
-    });
-  }
-
-  const pagination = getPagination(page, limit);
-  if (pagination.error) {
-    return res.status(422).send({
-      status: "error",
-      message: "Invalid query parameters",
-    });
-  }
-
-  const filters = parseNaturalLanguageFilters(q);
-  if (!filters) {
-    return res.status(422).send({
-      status: "error",
-      message: "Unable to interpret query",
-    });
-  }
-
-  let query = supabase.from("profiles").select("*", { count: "exact" });
-  if (filters.gender) query = query.eq("gender", filters.gender);
-  if (filters.age_group) query = query.eq("age_group", filters.age_group);
-  if (filters.country_id) query = query.eq("country_id", filters.country_id);
-  if (filters.min_age != null) query = query.gte("age", filters.min_age);
-  if (filters.max_age != null) query = query.lte("age", filters.max_age);
-
-  query = query.range(pagination.start, pagination.end);
-
-  try {
-    const { data, error, count } = await query;
-    if (error) {
-      return res.status(500).send({
-        status: "error",
-        message: error.message || "Server failure",
-      });
-    }
-
-    return res.status(200).send({
-      status: "success",
-      page: pagination.page,
-      limit: pagination.limit,
-      total: count,
-      data,
-    });
-  } catch (err) {
-    console.log(err);
-    return res.status(500).send({
-      status: "error",
-      message: "Server failure",
-    });
-  }
-});
+app.use("/api/profiles", profilesRouter);
+app.use("/auth", authRouter);
