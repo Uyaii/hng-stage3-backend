@@ -6,8 +6,9 @@ import supabase from "../utils/connectDB.js";
 import {
   generateAccessToken,
   generateRefreshToken,
-  verifyRefreshToken,
-} from "../utils/generateTokens.js";
+  hashToken,
+  verifyToken,
+} from "../utils/tokenUtils.js";
 import { tokenExchange } from "../utils/githubOauth.js";
 import bcrypt from "bcryptjs";
 
@@ -105,10 +106,7 @@ authRouter.get("/github/callback", async (req, res) => {
 
     const accessToken = generateAccessToken(dbUser);
     const refreshToken = generateRefreshToken(dbUser);
-    const hashedToken = crypto
-      .createHash("sha256")
-      .update(refreshToken)
-      .digest("hex");
+    const hashedToken = hashToken(refreshToken);
     const { data, error } = await supabase
       .from("tokens")
       .upsert(
@@ -153,17 +151,14 @@ authRouter.post("/refresh", async (req, res) => {
 
   try {
     //*  Verify the refresh token
-    const verifiedRefreshToken = verifyRefreshToken(refreshToken);
+    const verifiedRefreshToken = verifyToken(refreshToken);
     if (!verifiedRefreshToken)
       return res.send({
         status: "token error",
         message: verifiedRefreshToken,
       });
     // * Hash the refresh token to compare with the one in db
-    const hashedOldToken = crypto
-      .createHash("sha256")
-      .update(refreshToken)
-      .digest("hex");
+    const hashedOldToken = hashToken(refreshToken);
 
     const { data, error } = await supabase
       .from("tokens")
@@ -200,10 +195,8 @@ authRouter.post("/refresh", async (req, res) => {
       return res.send({ status: " /refresh db error", message: dbError });
     const accessToken = generateAccessToken(dbUser);
     const newRefreshToken = generateRefreshToken(dbUser);
-    const hashedNewToken = crypto
-      .createHash("sha256")
-      .update(newRefreshToken)
-      .digest("hex");
+    const hashedNewToken = hashToken(newRefreshToken);
+    //*  Delete the old hashed token
     await supabase.from("tokens").delete().eq("token_hash", hashedOldToken);
     const { data: tokenData, error: tokenError } = await supabase
       .from("tokens")
@@ -247,10 +240,7 @@ authRouter.post("/logout", async (req, res) => {
 
   try {
     // * Hash the refresh token to compare with the one in db
-    const hashedToken = crypto
-      .createHash("sha256")
-      .update(refresh_token)
-      .digest("hex");
+    const hashedToken = hashToken(refresh_token);
 
     const { data, error } = await supabase
       .from("tokens")
