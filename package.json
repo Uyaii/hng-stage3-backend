@@ -8,7 +8,9 @@
   "main": "index.js",
   "scripts": {
     "start": "nodemon index.js",
-    "dev": "nodemon index.js"
+    "dev": "nodemon index.js",
+    "lint": "eslint .",
+    "test": "echo 'No tests yet' && exit 0"
   },
   "dependencies": {
     "@json2csv/plainjs": "^7.0.6",
@@ -30,5 +32,8 @@
     "pg": "^8.20.0",
     "uuid": "^13.0.0",
     "uuidv7": "^1.2.1"
+  },
+  "devDependencies": {
+    "eslint": "^10.3.0"
   }
 }
