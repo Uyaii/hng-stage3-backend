@@ -9,6 +9,9 @@ import profilesRouter from "./routes/profiles.js";
 import authRouter from "./routes/auth.js";
 import authMiddleware from "./middleware/auth.js";
 import apiVersionMiddleware from "./middleware/apiVersion.js";
+import rateLimit from "express-rate-limit";
+import { authLimiter, generalLimiter } from "./utils/limitAndLogging.js";
+import morgan from "morgan";
 
 const app = express();
 app.use(cors({ origin: "*" }));
@@ -18,6 +21,8 @@ app.use((req, res, next) => {
   next();
 });
 app.use(express.json());
+
+app.use(morgan("dev"));
 
 const port = process.env.PORT || 3000;
 
@@ -39,6 +44,6 @@ const startServer = async () => {
 
 startServer();
 
-app.use("/api", authMiddleware, apiVersionMiddleware);
+app.use("/api", generalLimiter, authMiddleware, apiVersionMiddleware);
 app.use("/api/profiles", profilesRouter);
-app.use("/auth", authRouter);
+app.use("/auth", authLimiter, authRouter);

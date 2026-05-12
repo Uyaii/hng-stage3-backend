@@ -9,7 +9,7 @@ const authMiddleware = async (req, res, next) => {
         .send({ status: "error", message: "No authorization header" });
     
     const token = req.headers.authorization.split(" ")[1];
-    const user = verifyToken(token); // ! this returns the payload that was signed in the first place ie id,role etc
+    const user = verifyToken(token); // * this returns the payload that was signed in the first place ie id,role etc
     if (!user) return res.status(401).send({ status: "error", message: user });
 
     const { data: dbUser, error: dbError } = await supabase
